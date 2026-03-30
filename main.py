@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 
 # Add src to path
-sys.path.insert(0, str(Path(__file__).parent / 'src'))
+sys.path.insert(0, str(Path(__file__).parent / 'src' / 'data_etl'))
 
 
 def run_scraper():
@@ -121,6 +121,7 @@ if __name__ == '__main__':
     parser.add_argument('--extract', action='store_true', help='Only extraction')
     parser.add_argument('--status', action='store_true', help='Show status')
     parser.add_argument('--build-corpus', action='store_true', help='Build consolidated corpus')
+    parser.add_argument('--extract-metadata', action='store_true', help='Use LLM to extract date and doc_type metadata (needs OPENAI_API_KEY)')
     
     args = parser.parse_args()
     
@@ -145,8 +146,8 @@ if __name__ == '__main__':
         sys.exit(0)
 
     if args.build_corpus:
-        from src.build_corpus import build_corpus
-        build_corpus()
+        from src.data_etl.build_corpus import build_corpus
+        build_corpus(extract_metadata=args.extract_metadata)
         sys.exit(0)
     
     if args.scrape:

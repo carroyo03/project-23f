@@ -136,8 +136,8 @@ def run_ocr(df_meta: pd.DataFrame, max_workers: int | None = None, force: bool =
     from concurrent.futures import ProcessPoolExecutor
 
     # Import at module level is not possible for the worker (needs to be picklable)
-    # so we import inside the function and use a module-level worker via src/ocr_extractor.py
-    sys.path.insert(0, str(ROOT / "src"))
+    # so we import inside the function and use a module-level worker via src/data_etl/ocr_extractor.py
+    sys.path.insert(0, str(ROOT / 'src' / 'data_etl'))
     from ocr_extractor import _ocr_worker
 
     log.info("=== Step 2: OCR for scanned PDFs (EasyOCR) ===")
@@ -327,7 +327,7 @@ def run(
     Returns:
         df_final (pd.DataFrame) with columns defined in FINAL_COLUMNS.
     """
-    sys.path.insert(0, str(ROOT / "src"))
+    sys.path.insert(0, str(ROOT / 'src' / 'data_etl'))
 
     if not ENRICHED_CSV.exists():
         raise FileNotFoundError(
@@ -338,7 +338,7 @@ def run(
     if not RTVE_CSV.exists():
         raise FileNotFoundError(
             f"{RTVE_CSV} not found. Run the RTVE scraper first:\n"
-            "  python src/rtve_scraper.py"
+            "  python src/data_etl/rtve_scraper.py"
         )
 
     df_meta  = pd.read_csv(ENRICHED_CSV)

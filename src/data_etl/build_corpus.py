@@ -1,27 +1,19 @@
 """
 Build Document Corpus
 Merges extracted texts from La Moncloa PDFs and RTVE summaries into a single
-DataFrame/CSV for NLP and graph tasks.
+DataFrame/CSV for NLP and graph tasks. Includes data quality validation and 
+optional LLM-based metadata extraction.
 
 Output schema (document_corpus.csv):
-  doc_id            - unique identifier (M001 = Moncloa, R001 = RTVE)
-  source            - "Moncloa" | "RTVE"
-  title             - document title / name
-  url               - link to original document
-  ministry          - ministry (Moncloa docs only)
-  category          - document category (Moncloa docs only)
-  filename          - PDF filename (Moncloa docs only)
-  date              - document date extracted from filename (Moncloa docs only)
-  doc_type          - document type (Moncloa docs only)
-  tags              - thematic tags (RTVE docs only)
-  extracted_text    - full text extracted from the Moncloa PDF
-  extracted_text_length - character count of extracted_text
-  rtve_summary      - full summary from the RTVE catalog
+  ... includes analysis_text which maps to the best text string for downstream ml ...
 """
 
 import os
 import re
 import pandas as pd
+from typing import Optional
+
+from src.data_etl.data_cleaning import process_corpus_quality
 
 MONCLOA_META = "data/metadata/documents_enriched.csv"
 RTVE_META    = "data/metadata/rtve_documents.csv"
@@ -36,13 +28,16 @@ FINAL_COLUMNS = [
     "category",
     "filename",
     "date",
+    "date_precision",
     "doc_type",
     "tags",
     "extracted_text",
     "extracted_text_length",
     "rtve_summary",
+    "ocr_quality_score",
+    "flag_illegible",
+    "analysis_text"
 ]
-
 
 def _clean_text(text: str) -> str:
     if pd.isna(text) or not isinstance(text, str):
@@ -51,7 +46,6 @@ def _clean_text(text: str) -> str:
     text = re.sub(r"\n{3,}", "\n\n", text)
     text = re.sub(r" +", " ", text)
     return text.strip()
-
 
 def load_moncloa() -> pd.DataFrame:
     if not os.path.exists(MONCLOA_META):
@@ -124,7 +118,41 @@ def load_rtve() -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def build_corpus() -> None:
+def apply_analysis_text(df: pd.DataFrame) -> pd.DataFrame:
+    """Sets the canonical text metric based on available data and illegibility."""
+    def get_canonical(row):
+        if row["source"] == "RTVE":
+            return row["rtve_summary"] if pd.notna(row["rtve_summary"]) else ""
+        if row["source"] == "Moncloa":
+            if row.get("flag_illegible", False):
+                return "" # Drop noisy text from downstream NLP
+            return row["extracted_text"] if pd.notna(row["extracted_text"]) else ""
+        return ""
+        
+    df["analysis_text"] = df.apply(get_canonical, axis=1)
+    return df
+
+def normalize_dates(df: pd.DataFrame) -> pd.DataFrame:
+    """Calculates date_precision and normalizes the date column."""
+    def date_precision(date_str):
+        if pd.isna(date_str) or str(date_str).lower() in ['nan', 'nat', 'none']:
+            return 'unknown'
+        s = str(date_str).strip()
+        if len(s) == 10:   # 1981-02-23
+            return 'day'
+        elif len(s) == 7:  # 1981-02
+            return 'month'
+        else:
+            return 'year'
+
+    # Compute precision before parsing to datetime to preserve string length info
+    df['date_precision'] = df['date'].astype(str).apply(date_precision)
+    
+    # Normalize dates
+    df['date'] = pd.to_datetime(df['date'], format='mixed', dayfirst=True, errors='coerce')
+    return df
+
+def build_corpus(extract_metadata: bool = False, limit_metadata: Optional[int] = None) -> None:
     print("Loading Moncloa documents...")
     df_moncloa = load_moncloa()
     print(f"  {len(df_moncloa)} documents loaded.")
@@ -134,24 +162,48 @@ def build_corpus() -> None:
     print(f"  {len(df_rtve)} documents loaded.")
 
     df_corpus = pd.concat([df_moncloa, df_rtve], ignore_index=True)
-    df_corpus = df_corpus[FINAL_COLUMNS]
+    
+    # 1. OCR Quality Scanning
+    print("\nScanning corpus for OCR quality...")
+    df_corpus = process_corpus_quality(df_corpus, threshold=0.40)
+    
+    # 2. Assign canonical NLP text field
+    df_corpus = apply_analysis_text(df_corpus)
 
+    # 2.b Apply Simple Rules for doc_type inference
+    print("\nApplying simple rules to infer doc_type...")
+    from src.data_etl.doc_type_rules import fill_doc_types
+    df_corpus = fill_doc_types(df_corpus)
+
+    # 3. Optional LLM Extraction (Only on healthy documents)
+    if extract_metadata:
+        try:
+            from src.data_etl.metadata_extractor import batch_extract_metadata
+            print("\nStarting LLM Metadata Extraction...")
+            df_corpus = batch_extract_metadata(df_corpus, limit=limit_metadata)
+        except ImportError as e:
+            print(f"Cannot run metadata extraction: {e}")
+
+    # 4. Normalize Dates and add precision
+    print("\nNormalizing dates and calculating precision...")
+    df_corpus = normalize_dates(df_corpus)
+
+    # Restrict columns and save
+    missing_cols = [col for col in FINAL_COLUMNS if col not in df_corpus.columns]
+    for col in missing_cols:
+        df_corpus[col] = None
+        
+    df_corpus = df_corpus[FINAL_COLUMNS]
+    
     os.makedirs(os.path.dirname(OUTPUT_CORPUS), exist_ok=True)
     df_corpus.to_csv(OUTPUT_CORPUS, index=False, encoding="utf-8")
 
     print(f"\nCorpus saved to {OUTPUT_CORPUS}")
     print(f"Total documents : {len(df_corpus)}")
-    print(f"  Moncloa       : {(df_corpus['source'] == 'Moncloa').sum()}")
+    print(f"  Moncloa (legible) : len={len(df_corpus[(df_corpus['source'] == 'Moncloa') & (~df_corpus['flag_illegible'])])}")
+    print(f"  Moncloa (illegible) : len={len(df_corpus[(df_corpus['source'] == 'Moncloa') & (df_corpus['flag_illegible'])])}")
     print(f"  RTVE          : {(df_corpus['source'] == 'RTVE').sum()}")
-
-    empty_moncloa = df_corpus[(df_corpus["source"] == "Moncloa") & (df_corpus["extracted_text_length"] == 0)]
-    if not empty_moncloa.empty:
-        print(f"  Warning: {len(empty_moncloa)} Moncloa docs with empty extracted text")
-
-    empty_rtve = df_corpus[(df_corpus["source"] == "RTVE") & (df_corpus["rtve_summary"] == "")]
-    if not empty_rtve.empty:
-        print(f"  Warning: {len(empty_rtve)} RTVE docs with empty summary")
 
 
 if __name__ == "__main__":
-    build_corpus()
+    build_corpus(extract_metadata=False)

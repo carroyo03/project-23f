@@ -16,7 +16,7 @@ Analysis of the declassified documents relating to the February 23, 1981 attempt
 │       ├── extraction_log.csv      # Per-PDF extraction log
 │       ├── rtve_documents.csv      # RTVE 23-F catalog with summaries (167 docs)
 │       └── document_corpus.csv     # Final corpus — main analytical dataset (322 docs)
-├── src/
+├── src/data_etl/
 │   ├── moncloa_scraper.py          # Scrapes PDF links from La Moncloa
 │   ├── download_pdfs.py            # Downloads PDFs with retries and concurrency
 │   ├── pdf_extractor.py            # Native text extraction (pdfplumber)
@@ -47,7 +47,16 @@ Both sources cover the 23-F historical event but are **different document sets**
 
 ## Final Corpus — `document_corpus.csv`
 
-The main analytical dataset. 322 rows × 13 columns.
+The main analytical dataset. 322 rows × 17 columns (155 Moncloa + 167 RTVE). 306 documents are fully usable for NLP after removing the 16 illegible.
+
+### Known Limitations
+* **Missing Dates**: 81 documents have no date (`date_precision = unknown`), usually because their content is too fragmentary or they lack clear dating headers.
+* **Garbage OCR**: 16 Moncloa handwritten/garbled scanned documents have null `analysis_text` (`flag_illegible=True`) to prevent them from breaking NLP clustering and topic modeling downstream.
+* **RTVE Text**: RTVE items lack raw `extracted_text`. Since they represent judicial summaries, their `rtve_summary` is mapped directly to the `analysis_text` column.
+* **Short Documents**: The median length of `analysis_text` is ~303 characters, meaning many documents are extremely short memos, telexes, or very brief RTVE trial summaries.
+* **Source Discrepancies**: `ministry` and `category` parameters are only available for the La Moncloa declassified dataset.
+
+### Schema
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -58,12 +67,16 @@ The main analytical dataset. 322 rows × 13 columns.
 | `ministry` | str | Ministry of origin (Moncloa only) |
 | `category` | str | Document category (Moncloa only) |
 | `filename` | str | PDF filename (Moncloa only) |
-| `date` | str | Date extracted from filename (Moncloa only) |
-| `doc_type` | str | Document type: Telephone transcript, Intelligence note, Report… (Moncloa only) |
+| `date` | str | LLM-Extracted Date (Normalized via pd.to_datetime, Pandas format) |
+| `date_precision` | str | The precision level of the extracted date: `day`, `month`, `year`, or `unknown` |
+| `doc_type` | str | Document type inference: Resumen de Juicio, Telephone transcript, Intelligence note...|
 | `tags` | str | Thematic tags (RTVE only) |
 | `extracted_text` | str | Full text extracted from the PDF (Moncloa only — original Spanish) |
 | `extracted_text_length` | int | Character count of `extracted_text` |
 | `rtve_summary` | str | Summary from RTVE's archive platform (RTVE only — original Spanish) |
+| `ocr_quality_score` | float | Heuristic score measuring legibility |
+| `flag_illegible` | bool | `True` for handwritten/garbage texts |
+| `analysis_text` | str | Canonical unified text meant for NLP processing (omits garbage OCR) |
 
 ---
 
@@ -80,12 +93,19 @@ source .venv/bin/activate      # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 2. Scrape and download data (one-time)
+### 2. Configure Environment (Optional but Recommended)
+For date extraction, Nvidia Build provides an OpenAI-compatible API to Llama 3.1.
+```bash
+cp .env.example .env
+# Edit .env and paste your NVIDIA_API_KEY
+```
+
+### 3. Scrape and download data (one-time)
 
 ```bash
 python main.py --scrape     # Scrape PDF links from La Moncloa → moncloa_links.csv
 python main.py --download   # Download 155 PDFs to data/raw/
-python src/rtve_scraper.py  # Scrape RTVE 23-F catalog → rtve_documents.csv
+python src/data_etl/rtve_scraper.py  # Scrape RTVE 23-F catalog → rtve_documents.csv
 ```
 
 ### 3. Run the pipeline → get df_final
@@ -126,18 +146,20 @@ python pipeline.py --no-save         # Run but do not overwrite CSV
 python main.py --scrape              # Step 1: scrape La Moncloa links
 python main.py --download            # Step 2: download PDFs
 python main.py --extract             # Step 3: extract text (pdfplumber)
-python main.py --build-corpus        # Step 4: build document_corpus.csv
+python main.py --build-corpus        # Step 4: build document_corpus.csv (merges RTVE & runs OCR heuristics)
+python main.py --build-corpus --extract-metadata  # Build corpus + extract dates using Nvidia NIMs (Llama 3.1)
 python main.py --status              # Show current local data status
 ```
 
 ### Individual modules
 
 ```bash
-python src/rtve_scraper.py                     # Scrape RTVE catalog
-python src/ocr_extractor.py --dry-run          # Preview scanned PDFs pending OCR
-python src/ocr_extractor.py --limit 5          # Test OCR on 5 docs
-python src/ocr_extractor.py                    # OCR all scanned docs
-python src/build_corpus.py                     # Rebuild document_corpus.csv only
+python src/data_etl/rtve_scraper.py                     # Scrape RTVE catalog
+python src/data_etl/ocr_extractor.py --dry-run          # Preview scanned PDFs pending OCR
+python src/data_etl/ocr_extractor.py --limit 5          # Test OCR on 5 docs
+python src/data_etl/ocr_extractor.py                    # OCR all scanned docs
+python src/data_etl/build_corpus.py                     # Rebuild document_corpus.csv only
+python src/data_etl/metadata_extractor.py               # Test the LLM integration script directly
 ```
 
 ---

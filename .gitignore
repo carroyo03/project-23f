@@ -4,6 +4,9 @@ data/
 # Extracted data
 data/*
 
+# Environment variables
+.env
+
 # Python artifacts
 __pycache__/
 *.pyc
