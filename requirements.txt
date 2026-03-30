@@ -1,0 +1,44 @@
+# === Web scraping y descarga ===
+niquests>=3.6.0          # Drop-in replacement de requests con HTTP/2 nativo
+beautifulsoup4>=4.12.0
+lxml>=4.9.0
+
+# === Extracción de texto de PDFs ===
+pdfplumber>=0.10.0
+PyPDF2>=3.0.0
+
+
+# === OCR para PDFs escaneados ===
+# Ahora usando EasyOCR (aceleración GPU/MPS si está disponible)
+easyocr>=1.7.1
+torch>=2.0.0
+Pillow>=10.0.0
+# pytesseract>=0.3.10  # (obsoleto, sustituido por EasyOCR)
+
+# === Manipulación de datos ===
+pandas>=2.0.0
+numpy>=1.24.0
+tqdm>=4.66.0
+openpyxl>=3.1.0
+
+# === Visualización (Sprint 2+) ===
+matplotlib>=3.7.0
+seaborn>=0.12.0
+plotly>=5.15.0
+
+# === NLP (Sprint 2+) ===
+spacy>=3.7.0
+# Modelo español (ejecutar una vez tras instalar):
+#   python -m spacy download es_core_news_lg
+sentence-transformers>=2.2.0
+bertopic>=0.16.0
+hdbscan>=0.8.33
+scikit-learn>=1.3.0
+
+# === Grafos (Sprint 2+) ===
+networkx>=3.1
+# Gephi es una app de escritorio, no una librería Python:
+#   https://gephi.org
+
+# === LLM (Sprint 1+) ===
+anthropic>=0.25.0
