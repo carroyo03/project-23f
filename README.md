@@ -1,9 +1,7 @@
 # ML Project 23-F — Declassified Documents
 
-Analysis of the declassified documents relating to the February 23, 1981 attempted coup d'état.
+Analysis of the declassified documents relating to the February 23, 1981 attempted coup d'état in Spain.
 
-**Team:** Carlos · Alberto · Alejandro · Jose
-**Master's in Machine Learning — University of Navarra**
 
 ---
 
@@ -29,14 +27,14 @@ Analysis of the declassified documents relating to the February 23, 1981 attempt
 
 ---
 
-## Getting Started: How to Obtain the Data (`.txt` and `.csv`)
+## How to Obtain the Data (`.txt` and `.csv`)
 
 To keep the repository clean and light, **all data files (PDFs, TXTs, and CSVs) are ignored in Git**. Every team member must generate the data locally by running the extraction pipeline.
 
 ### 1. Clone the repo and Setup
 
 ```bash
-git clone <repo-url>
+git clone https://www.github.com/carroyo03/project-23f.git
 cd project-23f
 
 # Create virtual environment and install dependencies
@@ -70,19 +68,6 @@ python main.py
 
 ---
 
-## Current Status
-
-| Resource | Quantity | Notes |
-|---------|----------|-------|
-| PDFs in La Moncloa | 153 | Scraped from lamoncloa.gob.es |
-| Extracted TXT (pdfplumber) | 41 | PDFs with native text |
-| Pending OCR | 112 | ~73% are scanned PDFs |
-| Docs in RTVE search | 167 | Supplemental corpus with summaries |
-
-**Sprint 1 (upcoming):** Carlos applies OCR to the 112 scanned docs and extracts metadata with LLM → CSV of 153 rows and ~15 columns.
-
----
-
 ## Pipeline Commands Reference
 
 ```bash
@@ -98,12 +83,3 @@ python src/ocr_extractor.py            # Process all scanned docs
 ```
 
 ---
-
-## Use Cases (Sprint 2)
-
-| Case | Owner | Description |
-|------|-------------|-------------|
-| Graphs | Carlos | NER + actor co-occurrence networks (spaCy + networkx + Gephi) |
-| NLP / Topics | Alberto | BERTopic on clean corpus, CESID vs others linguistic profile |
-| Chronology | Alejandro | Hour-by-hour timeline of 23-F, gaps in communications |
-| Clustering | Jose | Embeddings + HDBSCAN/K-Means document clustering |
