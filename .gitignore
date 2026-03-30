@@ -1,7 +1,4 @@
-# PDFs — too large (279 MB), regenerate with: python main.py --download
-data/
-
-# Extracted data
+# Data folders — raw PDFs and processed TXTs and CSV too large/messy
 data/*
 
 # Environment variables
@@ -37,6 +34,3 @@ env/
 # Keep PDFs out of repo
 *.pdf
 sprints*.html
-
-# gitkeeper
-.gitkeep

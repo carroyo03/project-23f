@@ -108,7 +108,7 @@ python main.py --download   # Download 155 PDFs to data/raw/
 python src/data_etl/rtve_scraper.py  # Scrape RTVE 23-F catalog → rtve_documents.csv
 ```
 
-### 3. Run the pipeline → get df_final
+### 4. Run the pipeline → get df_final
 
 ```bash
 python pipeline.py          # Extract text + build corpus → document_corpus.csv
