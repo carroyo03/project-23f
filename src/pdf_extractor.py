@@ -26,13 +26,13 @@ SCANNED_THRESHOLD = 50
 
 # Document type by keywords in filename
 _TIPO_KEYWORDS: dict[str, str] = {
-    "conversacion": "Transcripción telefónica",
+    "conversacion": "Telephone transcript",
     "telex": "Telex",
-    "nota": "Nota informativa",
-    "informe": "Informe",
-    "vista": "Vista oral",
-    "reservado": "Reservado",
-    "secreto": "Secreto",
+    "nota": "Intelligence note",
+    "informe": "Report",
+    "vista": "Oral hearing",
+    "reservado": "Restricted",
+    "secreto": "Secret",
 }
 
 
@@ -90,8 +90,8 @@ def extract_doc_info(filename: str) -> dict[str, str | None]:
 
     return {
         "doc_num": num_match.group(1) if num_match else None,
-        "fecha": date_match.group(1) if date_match else None,
-        "tipo": tipo,
+        "date": date_match.group(1) if date_match else None,
+        "doc_type": tipo,
     }
 
 

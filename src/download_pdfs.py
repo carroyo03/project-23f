@@ -19,7 +19,7 @@ from tqdm import tqdm
 
 DATA_DIR = Path("data")
 RAW_DIR = DATA_DIR / "raw"
-LINKS_FILE = DATA_DIR / "metadata" / "links_moncloa.csv"
+LINKS_FILE = DATA_DIR / "metadata" / "moncloa_links.csv"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -57,8 +57,8 @@ def download_pdf(row: pd.Series, output_base: Path = RAW_DIR) -> dict:
     url: str = row["url"]
     filename = _safe_name(url)
 
-    minister = str(row.get("ministerio", "General")).replace("/", "_").replace(" ", "_")
-    categoria = str(row.get("categoria", "General")).replace("/", "_").replace(" ", "_")
+    minister = str(row.get("ministry", "General")).replace("/", "_").replace(" ", "_")
+    categoria = str(row.get("category", "General")).replace("/", "_").replace(" ", "_")
 
     dest_dir = output_base / minister / categoria
     dest_dir.mkdir(parents=True, exist_ok=True)

@@ -1,18 +1,15 @@
 """
-Main: Complete pipeline for 23-F documents
-Sprint 0 - Foundation
+Step-by-step CLI orchestrator for the 23-F pipeline.
 
-Orchestrates the entire flow:
-1. Scrape links from La Moncloa
-2. Download PDFs
-3. Extract text
-4. Generate enriched CSV
+For the end-to-end pipeline (extraction + OCR + corpus build) use pipeline.py instead:
+    python pipeline.py
 
-Usage:
-    python main.py                    # Runs the complete pipeline
-    python main.py --scrape           # Only scraping
-    python main.py --download         # Only download
-    python main.py --extract          # Only extraction
+This module provides granular step control:
+    python main.py --scrape      # Scrape PDF links from La Moncloa
+    python main.py --download    # Download PDFs to data/raw/
+    python main.py --extract     # Extract text from native PDFs
+    python main.py --build-corpus  # Build document_corpus.csv
+    python main.py --status      # Show current local data status
 """
 
 import argparse
@@ -109,7 +106,7 @@ def show_status():
         print("Extracted texts: 0 (directory does not exist)")
     
     # Detected links
-    links_file = metadata_dir / 'links_moncloa.csv'
+    links_file = metadata_dir / 'moncloa_links.csv'
     if links_file.exists():
         df_links = pd.read_csv(links_file)
         print(f"Detected links: {len(df_links)}")
@@ -123,6 +120,7 @@ if __name__ == '__main__':
     parser.add_argument('--download', action='store_true', help='Only download')
     parser.add_argument('--extract', action='store_true', help='Only extraction')
     parser.add_argument('--status', action='store_true', help='Show status')
+    parser.add_argument('--build-corpus', action='store_true', help='Build consolidated corpus')
     
     args = parser.parse_args()
     
@@ -144,6 +142,11 @@ if __name__ == '__main__':
     
     if args.status:
         show_status()
+        sys.exit(0)
+
+    if args.build_corpus:
+        from src.build_corpus import build_corpus
+        build_corpus()
         sys.exit(0)
     
     if args.scrape:

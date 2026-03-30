@@ -56,7 +56,7 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
     txt_path = Path(txt_path_str)
 
     if not pdf_path.exists():
-        return {"archivo": pdf_path.name, "status": "pdf_not_found", "chars": 0, "error": "PDF not found"}
+        return {"filename": pdf_path.name, "status": "pdf_not_found", "chars": 0, "error": "PDF not found"}
 
     try:
         # Initialize EasyOCR (uses GPU/MPS if available)
@@ -78,10 +78,10 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
         txt_path.parent.mkdir(parents=True, exist_ok=True)
         txt_path.write_text(full_text, encoding="utf-8")
 
-        return {"archivo": pdf_path.name, "status": "success", "chars": len(full_text), "error": None}
+        return {"filename": pdf_path.name, "status": "success", "chars": len(full_text), "error": None}
 
     except Exception as e:
-        return {"archivo": pdf_path.name, "status": "error", "chars": 0, "error": str(e)}
+        return {"filename": pdf_path.name, "status": "error", "chars": 0, "error": str(e)}
 
 
 # ---------------------------------------------------------------------------
@@ -107,7 +107,7 @@ def process_scanned_pdfs(
     print("OCR EXTRACTOR - Scanned PDFs (EasyOCR GPU/MPS)")
     print("=" * 60)
 
-    csv_path = METADATA_DIR / "documentos_23f_enriquecido.csv"
+    csv_path = METADATA_DIR / "documents_enriched.csv"
     if not csv_path.exists():
         print(f"ERROR: Does not exist {csv_path}")
         return None
@@ -167,7 +167,7 @@ def process_scanned_pdfs(
     if update_csv and not success.empty:
         df_meta = pd.read_csv(csv_path)
         for _, res in success.iterrows():
-            mask = df_meta["archivo"] == res["archivo"]
+            mask = df_meta["filename"] == res["filename"]
             df_meta.loc[mask, "char_count"] = res["chars"]
             df_meta.loc[mask, "is_scanned"] = False
         df_meta.to_csv(csv_path, index=False)

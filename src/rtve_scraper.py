@@ -17,7 +17,7 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 BASE_URL = "https://23fbuscador.rtve.es/"
-OUTPUT_PATH = "data/metadata/rtve_23f.csv"
+OUTPUT_PATH = "data/metadata/rtve_documents.csv"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -61,10 +61,10 @@ def _parse_page(html: str) -> tuple[list[dict], str]:
         tags = " | ".join(t.get_text(strip=True) for t in tds[4].select(".tag-chip")) if len(tds) > 4 else ""
 
         rows.append({
-            "nombre": tds[0].get_text(strip=True),
-            "paginas": tds[1].get_text(strip=True),
-            "tamaño_kb": tds[2].get_text(strip=True),
-            "resumen_truncado": tds[3].get_text(separator=" ", strip=True),
+            "name": tds[0].get_text(strip=True),
+            "pages": tds[1].get_text(strip=True),
+            "size_kb": tds[2].get_text(strip=True),
+            "summary_truncated": tds[3].get_text(separator=" ", strip=True),
             "tags": tags,
             "link": link,
         })
@@ -148,11 +148,11 @@ def scrape_all(page_size: int = 200, max_detail_workers: int = MAX_DETAIL_WORKER
             for future in tqdm(as_completed(future_map), total=len(future_map), desc="Details"):
                 idx = future_map[future]
                 text = future.result()
-                summaries[idx] = text or df.iloc[idx]["resumen_truncado"]
+                summaries[idx] = text or df.iloc[idx]["summary_truncated"]
 
-        df["resumen"] = summaries
+        df["summary"] = summaries
 
-    return df[["nombre", "paginas", "tamaño_kb", "resumen", "tags", "link"]]
+    return df[["name", "pages", "size_kb", "summary", "tags", "link"]]
 
 
 def main() -> None:

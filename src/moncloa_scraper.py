@@ -100,11 +100,11 @@ def parse_document_links(html: str) -> list[dict]:
                     if ".pdf" in href.lower() and "boe" not in href.lower():
                         documents.append(
                             {
-                                "nombre": link.get_text(strip=True) or href.split("/")[-1],
+                                "name": link.get_text(strip=True) or href.split("/")[-1],
                                 "url": urljoin(BASE_URL, href),
-                                "ministerio": current_ministerio or "Unknown",
-                                "categoria": current_categoria,
-                                "archivo": href.split("/")[-1],
+                                "ministry": current_ministerio or "Unknown",
+                                "category": current_categoria,
+                                "filename": href.split("/")[-1],
                             }
                         )
             sibling = sibling.find_next_sibling()
@@ -129,13 +129,13 @@ def scrape_all() -> list[dict]:
     print(f"\nTotal documents found: {len(documents)}")
     if documents:
         df = pd.DataFrame(documents)
-        print("\nBy Ministry:\n", df["ministerio"].value_counts().to_string())
-        print("\nBy Category:\n", df["categoria"].value_counts().to_string())
+        print("\nBy Ministry:\n", df["ministry"].value_counts().to_string())
+        print("\nBy Category:\n", df["category"].value_counts().to_string())
 
     return documents
 
 
-def save_to_csv(documents: list[dict], output_path: str | Path = "data/metadata/links_moncloa.csv") -> pd.DataFrame:
+def save_to_csv(documents: list[dict], output_path: str | Path = "data/metadata/moncloa_links.csv") -> pd.DataFrame:
     """Saves the links to a CSV."""
     df = pd.DataFrame(documents)
     df.to_csv(output_path, index=False, encoding="utf-8")
@@ -146,7 +146,7 @@ def save_to_csv(documents: list[dict], output_path: str | Path = "data/metadata/
 if __name__ == "__main__":
     documents = scrape_all()
     if documents:
-        save_to_csv(documents, "data/metadata/links_moncloa.csv")
+        save_to_csv(documents, "data/metadata/moncloa_links.csv")
         print(f"\nScraping completed! {len(documents)} PDFs detected.")
     else:
         print("\nERROR! No documents found. Verify the scraper.")
