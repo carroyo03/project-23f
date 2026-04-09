@@ -136,6 +136,28 @@ Expected:
 - `(322, 13)`
 - `155 167`
 
+### 5. Sprint 1 (Alber) quick tasks
+
+Generate the manual validation sample (10-15 rows suggested by the team plan):
+
+```bash
+python src/sprint1/manual_validation_sample.py --n 15
+```
+
+Output:
+- `outputs/sprint1/manual_validation_sample.csv`
+
+Start NLP preprocessing and vocabulary exploration by ministry:
+
+```bash
+python src/sprint1/nlp_vocab_by_ministry.py --top-k 30 --min-len 3
+```
+
+Outputs:
+- `outputs/sprint1/top_words_overall.csv`
+- `outputs/sprint1/top_words_by_ministry.csv`
+- `outputs/sprint1/nlp_preprocess_summary.txt`
+
 If you only want to inspect or rebuild the Moncloa extraction step, you can run:
 
 ```bash

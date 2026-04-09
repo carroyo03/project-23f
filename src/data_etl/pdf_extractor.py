@@ -152,7 +152,7 @@ def process_all_pdfs(
     print("EXTRACTOR - 23-F PDFs Text")
     print("=" * 60)
 
-    pdf_files = list(raw_dir.rglob("*.pdf"))
+    pdf_files = [p for p in raw_dir.rglob("*") if p.is_file() and p.suffix.lower() == ".pdf"]
     if not pdf_files:
         print(f"\nERROR: No PDFs found in {raw_dir}")
         return None

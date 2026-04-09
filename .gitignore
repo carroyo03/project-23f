@@ -34,3 +34,7 @@ env/
 # Keep PDFs out of repo
 *.pdf
 sprints*.html
+
+# Sprint 1 generated artifacts (keep only manual validation sheet)
+outputs/sprint1/*
+!outputs/sprint1/manual_validation_sample.csv
