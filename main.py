@@ -93,7 +93,7 @@ def show_status():
     
     # Count downloaded PDFs
     if raw_dir.exists():
-        pdfs = list(raw_dir.rglob('*.pdf'))
+        pdfs = [p for p in raw_dir.rglob('*') if p.is_file() and p.suffix.lower() == '.pdf']
         print(f"\nDownloaded PDFs: {len(pdfs)}")
     else:
         print("\nDownloaded PDFs: 0 (directory does not exist)")

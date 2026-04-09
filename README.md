@@ -110,6 +110,32 @@ python src/data_etl/rtve_scraper.py  # Scrape RTVE 23-F catalog → rtve_documen
 python pipeline.py          # Extract text, save documents_enriched.csv, and build document_corpus.csv
 ```
 
+### 4. Verify you reached the expected 322 documents
+
+```bash
+python main.py --status
+```
+
+Expected:
+- Downloaded PDFs: 155
+- Extracted texts: 155
+- Detected links: 155
+
+And check the final corpus shape:
+
+```bash
+.venv/bin/python - <<'PY'
+import pandas as pd
+df = pd.read_csv('data/metadata/document_corpus.csv')
+print(df.shape)
+print((df['source'] == 'Moncloa').sum(), (df['source'] == 'RTVE').sum())
+PY
+```
+
+Expected:
+- `(322, 13)`
+- `155 167`
+
 If you only want to inspect or rebuild the Moncloa extraction step, you can run:
 
 ```bash

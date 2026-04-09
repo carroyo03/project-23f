@@ -96,8 +96,18 @@ def _prepare_moncloa_meta(df_meta: pd.DataFrame) -> pd.DataFrame:
     if DOWNLOAD_LOG_CSV.exists() and "url" in df_meta.columns:
         df_dl = pd.read_csv(DOWNLOAD_LOG_CSV)
         if "url" in df_dl.columns and "local_path" in df_dl.columns:
-            df_dl = df_dl[["url", "local_path"]].drop_duplicates(subset=["url"], keep="last")
-            df_meta = df_meta.merge(df_dl, on="url", how="left")
+            url_to_local = (
+                df_dl[["url", "local_path"]]
+                .dropna(subset=["url"])
+                .drop_duplicates(subset=["url"], keep="last")
+                .set_index("url")["local_path"]
+            )
+
+            if "local_path" not in df_meta.columns:
+                df_meta["local_path"] = df_meta["url"].map(url_to_local)
+            else:
+                missing = df_meta["local_path"].isna() | (df_meta["local_path"].astype(str).str.strip() == "")
+                df_meta.loc[missing, "local_path"] = df_meta.loc[missing, "url"].map(url_to_local)
 
     if "rel_path" not in df_meta.columns:
         df_meta["rel_path"] = ""
