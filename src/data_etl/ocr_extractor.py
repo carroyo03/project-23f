@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import os
+import ssl
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -34,6 +35,28 @@ METADATA_DIR = DATA_DIR / "metadata"
 
 OCR_LANG = "es"  # EasyOCR uses 'es' for Spanish
 RESOLUTION = 300  # DPI for page-to-image conversion
+
+
+_OCR_READER = None
+
+
+def _allow_easyocr_model_downloads() -> None:
+    """Allow EasyOCR to fetch its model files in environments with broken CA bundles."""
+    ssl._create_default_https_context = ssl._create_unverified_context
+
+
+def _get_reader(gpu: bool = False):
+    """Creates one EasyOCR reader per process and reuses it across tasks."""
+    global _OCR_READER
+    if _OCR_READER is None:
+        _allow_easyocr_model_downloads()
+        _OCR_READER = easyocr.Reader([OCR_LANG], gpu=gpu)
+    return _OCR_READER
+
+
+def _warm_up_easyocr_cache(gpu: bool = False) -> None:
+    """Downloads EasyOCR models once in the parent process before spawning workers."""
+    _get_reader(gpu=gpu)
 
 
 # ---------------------------------------------------------------------------
@@ -59,8 +82,8 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
         return {"filename": pdf_path.name, "status": "pdf_not_found", "chars": 0, "error": "PDF not found"}
 
     try:
-        # Initialize EasyOCR (uses GPU/MPS if available)
-        reader = easyocr.Reader([OCR_LANG], gpu=True)
+        # Reuse one EasyOCR reader per process.
+        reader = _get_reader(gpu=False)
         pages_text: list[str] = []
 
         with pdfplumber.open(pdf_path) as pdf:
@@ -132,11 +155,15 @@ def process_scanned_pdfs(
         pending = pending.head(limit)
         print(f"Limiting to {limit} PDFs for testing\n")
 
+    print("Pre-warming EasyOCR model cache...")
+    _warm_up_easyocr_cache(gpu=False)
+
     # Build task list (pdf_path, txt_path)
     tasks: list[tuple[str, str]] = []
     for _, row in pending.iterrows():
-        pdf_path = RAW_DIR / row["rel_path"]
-        txt_path = PROCESSED_DIR / str(row["rel_path"]).replace(".pdf", ".txt")
+        rel_path = Path(str(row["rel_path"]))
+        pdf_path = RAW_DIR / rel_path
+        txt_path = PROCESSED_DIR / rel_path.with_suffix(".txt")
         tasks.append((str(pdf_path), str(txt_path)))
 
     workers = max_workers or max(1, (os.cpu_count() or 2) // 2)
