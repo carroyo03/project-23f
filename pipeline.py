@@ -37,6 +37,8 @@ PROCESSED_DIR = DATA_DIR / "processed"
 METADATA_DIR = DATA_DIR / "metadata"
 
 ENRICHED_CSV = METADATA_DIR / "documents_enriched.csv"
+MONCLOA_LINKS_CSV = METADATA_DIR / "moncloa_links.csv"
+DOWNLOAD_LOG_CSV = METADATA_DIR / "download_log.csv"
 RTVE_CSV     = METADATA_DIR / "rtve_documents.csv"
 CORPUS_CSV   = METADATA_DIR / "document_corpus.csv"
 
@@ -50,6 +52,70 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 log = logging.getLogger(__name__)
+
+
+def _to_rel_raw_path(path_str: str) -> str | None:
+    """Converts a path string to a RAW_DIR-relative POSIX path."""
+    if not isinstance(path_str, str) or not path_str:
+        return None
+
+    p = Path(path_str)
+    if not p.is_absolute():
+        p = (ROOT / p).resolve()
+
+    try:
+        return p.relative_to(RAW_DIR.resolve()).as_posix()
+    except ValueError:
+        return None
+
+
+def _resolve_rel_path(row: pd.Series) -> str:
+    """Returns the most reliable RAW_DIR-relative path for a PDF row."""
+    rel = row.get("rel_path")
+    if isinstance(rel, str) and rel:
+        return rel
+
+    local_path = row.get("local_path")
+    rel_from_local = _to_rel_raw_path(local_path) if isinstance(local_path, str) else None
+    if rel_from_local:
+        return rel_from_local
+
+    filename = row.get("filename")
+    if isinstance(filename, str) and filename:
+        for p in RAW_DIR.rglob(filename):
+            return p.relative_to(RAW_DIR).as_posix()
+        return filename
+
+    return ""
+
+
+def _prepare_moncloa_meta(df_meta: pd.DataFrame) -> pd.DataFrame:
+    """Attaches rel_path/local_path to Moncloa metadata using download log when available."""
+    df_meta = df_meta.copy()
+
+    if DOWNLOAD_LOG_CSV.exists() and "url" in df_meta.columns:
+        df_dl = pd.read_csv(DOWNLOAD_LOG_CSV)
+        if "url" in df_dl.columns and "local_path" in df_dl.columns:
+            df_dl = df_dl[["url", "local_path"]].drop_duplicates(subset=["url"], keep="last")
+            df_meta = df_meta.merge(df_dl, on="url", how="left")
+
+    if "rel_path" not in df_meta.columns:
+        df_meta["rel_path"] = ""
+
+    df_meta["rel_path"] = df_meta.apply(_resolve_rel_path, axis=1)
+
+    if "filename" not in df_meta.columns:
+        df_meta["filename"] = ""
+    df_meta["filename"] = df_meta["rel_path"].apply(
+        lambda s: Path(s).name if isinstance(s, str) and s else ""
+    )
+
+    if "pdf_path" not in df_meta.columns:
+        df_meta["pdf_path"] = ""
+    if "txt_path" not in df_meta.columns:
+        df_meta["txt_path"] = ""
+
+    return df_meta
 
 # ---------------------------------------------------------------------------
 # Step 1 — Text extraction (pdfplumber, I/O-bound → ThreadPoolExecutor)
@@ -87,14 +153,36 @@ def run_extraction(df_meta: pd.DataFrame, max_workers: int = 4, force: bool = Fa
     """
     log.info("=== Step 1: PDF text extraction (pdfplumber) ===")
 
+    df_meta = df_meta.copy()
+
+    # Ensure extraction columns exist even when starting from moncloa_links.csv
+    # so downstream steps can run without KeyError.
+    if "char_count" not in df_meta.columns:
+        df_meta["char_count"] = 0
+    if "is_scanned" not in df_meta.columns:
+        df_meta["is_scanned"] = True
+    if "success" not in df_meta.columns:
+        df_meta["success"] = False
+
     tasks: list[tuple[Path, Path]] = []
     for _, row in df_meta.iterrows():
-        pdf_path = RAW_DIR / row["filename"]
-        txt_path = PROCESSED_DIR / Path(row["filename"]).with_suffix(".txt").name
+        rel_path = _resolve_rel_path(row)
+        pdf_path = RAW_DIR / rel_path
+        txt_path = PROCESSED_DIR / Path(rel_path).with_suffix(".txt")
 
         if not pdf_path.exists():
             continue
         if txt_path.exists() and not force:
+            # Hydrate stats from cached txt when available.
+            text = _clean_text(_read_txt(txt_path))
+            char_count = len(text)
+            mask = df_meta["filename"] == row["filename"]
+            df_meta.loc[mask, "char_count"] = char_count
+            df_meta.loc[mask, "is_scanned"] = char_count < 200
+            df_meta.loc[mask, "success"] = True
+            df_meta.loc[mask, "rel_path"] = rel_path
+            df_meta.loc[mask, "pdf_path"] = str(pdf_path)
+            df_meta.loc[mask, "txt_path"] = str(txt_path)
             continue
         tasks.append((pdf_path, txt_path))
 
@@ -112,11 +200,21 @@ def run_extraction(df_meta: pd.DataFrame, max_workers: int = 4, force: bool = Fa
             results[r["filename"]] = r
 
     # Update df_meta in place
-    df_meta = df_meta.copy()
     for fname, r in results.items():
         mask = df_meta["filename"] == fname
         df_meta.loc[mask, "char_count"] = r["char_count"]
         df_meta.loc[mask, "is_scanned"] = r["is_scanned"]
+        df_meta.loc[mask, "success"] = r["error"] is None
+
+    for _, row in df_meta.iterrows():
+        rel_path = _resolve_rel_path(row)
+        if rel_path:
+            pdf_path = RAW_DIR / rel_path
+            txt_path = PROCESSED_DIR / Path(rel_path).with_suffix(".txt")
+            mask = df_meta["filename"] == row["filename"]
+            df_meta.loc[mask, "rel_path"] = rel_path
+            df_meta.loc[mask, "pdf_path"] = str(pdf_path)
+            df_meta.loc[mask, "txt_path"] = str(txt_path)
 
     ok    = sum(1 for r in results.values() if r["error"] is None)
     errs  = sum(1 for r in results.values() if r["error"])
@@ -150,8 +248,9 @@ def run_ocr(df_meta: pd.DataFrame, max_workers: int | None = None, force: bool =
 
     tasks: list[tuple[str, str]] = []
     for _, row in pending.iterrows():
-        pdf_path = RAW_DIR / row["filename"]
-        txt_path = PROCESSED_DIR / Path(row["filename"]).with_suffix(".txt").name
+        rel_path = _resolve_rel_path(row)
+        pdf_path = RAW_DIR / rel_path
+        txt_path = PROCESSED_DIR / Path(rel_path).with_suffix(".txt")
 
         if not pdf_path.exists():
             continue
@@ -214,7 +313,8 @@ def load_moncloa_texts(df_meta: pd.DataFrame) -> pd.DataFrame:
     missing = 0
 
     for _, row in df_meta.iterrows():
-        txt_path = PROCESSED_DIR / Path(row["filename"]).with_suffix(".txt").name
+        rel_path = _resolve_rel_path(row)
+        txt_path = PROCESSED_DIR / Path(rel_path).with_suffix(".txt")
         if txt_path.exists():
             texts.append(_clean_text(_read_txt(txt_path)))
         else:
@@ -329,7 +429,12 @@ def run(
     """
     sys.path.insert(0, str(ROOT / 'src' / 'data_etl'))
 
-    if not ENRICHED_CSV.exists():
+    if ENRICHED_CSV.exists():
+        df_meta = pd.read_csv(ENRICHED_CSV)
+    elif MONCLOA_LINKS_CSV.exists():
+        df_meta = pd.read_csv(MONCLOA_LINKS_CSV)
+        log.info(f"Loaded: {len(df_meta)} Moncloa links, enriching with extraction results")
+    else:
         raise FileNotFoundError(
             f"{ENRICHED_CSV} not found. Run the scraper + downloader first:\n"
             "  python main.py --scrape\n"
@@ -341,7 +446,8 @@ def run(
             "  python src/data_etl/rtve_scraper.py"
         )
 
-    df_meta  = pd.read_csv(ENRICHED_CSV)
+    df_meta = _prepare_moncloa_meta(df_meta)
+
     df_rtve  = pd.read_csv(RTVE_CSV)
 
     log.info(f"Loaded: {len(df_meta)} Moncloa docs, {len(df_rtve)} RTVE docs")
@@ -356,6 +462,10 @@ def run(
             log.warning(f"  {scanned} scanned PDFs skipped (pass apply_ocr=True to process them)")
 
     df_meta = load_moncloa_texts(df_meta)
+
+    METADATA_DIR.mkdir(parents=True, exist_ok=True)
+    df_meta.to_csv(ENRICHED_CSV, index=False, encoding="utf-8")
+    log.info(f"Saved: {ENRICHED_CSV}  ({len(df_meta)} rows)")
 
     df_final = build_final_corpus(df_meta, df_rtve)
 
@@ -391,6 +501,13 @@ if __name__ == "__main__":
             print(f"Moncloa docs     : {len(df)}")
             print(f"Already extracted: {already_done}")
             print(f"Scanned (OCR)    : {scanned}")
+        elif MONCLOA_LINKS_CSV.exists():
+            df = pd.read_csv(MONCLOA_LINKS_CSV)
+            print(f"Moncloa docs     : {len(df)} (from moncloa_links.csv)")
+            print("Already extracted: 0")
+            print("Scanned (OCR)    : 0")
+        else:
+            print("Moncloa docs     : 0 (run python main.py --scrape first)")
         if RTVE_CSV.exists():
             print(f"RTVE docs        : {len(pd.read_csv(RTVE_CSV))}")
         sys.exit(0)

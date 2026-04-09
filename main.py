@@ -31,7 +31,7 @@ def run_scraper():
     documents = scrape_all()
     
     if documents:
-        save_to_csv(documents, 'data/metadata/links_moncloa.csv')
+        save_to_csv(documents, 'data/metadata/moncloa_links.csv')
         print(f"\n✓ Scraping completed: {len(documents)} PDFs detected")
         return True
     else:
@@ -66,7 +66,7 @@ def run_extraction():
     print("STEP 3: TEXT EXTRACTION")
     print("="*60)
     
-    df = process_all_pdfs(apply_ocr=False)
+    df = process_all_pdfs()
     
     if df is not None:
         success = df['success'].sum()

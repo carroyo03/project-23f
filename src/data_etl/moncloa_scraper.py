@@ -138,6 +138,7 @@ def scrape_all() -> list[dict]:
 def save_to_csv(documents: list[dict], output_path: str | Path = "data/metadata/moncloa_links.csv") -> pd.DataFrame:
     """Saves the links to a CSV."""
     df = pd.DataFrame(documents)
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(output_path, index=False, encoding="utf-8")
     print(f"Saved to: {output_path}")
     return df
