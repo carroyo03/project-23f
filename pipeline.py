@@ -26,6 +26,11 @@ import pandas as pd
 from tqdm import tqdm
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
+try:
+    import torch
+except ImportError:
+    torch = None
+
 # ---------------------------------------------------------------------------
 # Paths
 # ---------------------------------------------------------------------------
@@ -246,7 +251,7 @@ def run_ocr(df_meta: pd.DataFrame, max_workers: int | None = None, force: bool =
     # Import at module level is not possible for the worker (needs to be picklable)
     # so we import inside the function and use a module-level worker via src/data_etl/ocr_extractor.py
     sys.path.insert(0, str(ROOT / 'src' / 'data_etl'))
-    from ocr_extractor import _ocr_worker
+    from ocr_extractor import _ocr_worker, _has_accelerator
 
     log.info("=== Step 2: OCR for scanned PDFs (EasyOCR) ===")
 
@@ -272,8 +277,15 @@ def run_ocr(df_meta: pd.DataFrame, max_workers: int | None = None, force: bool =
         log.info("  All scanned PDFs already OCR'd. Skipping.")
         return df_meta
 
-    workers = max_workers or max(1, (os.cpu_count() or 2) // 2)
-    log.info(f"  {len(tasks)} PDFs to OCR ({workers} processes, EasyOCR GPU/MPS)")
+    has_accel = _has_accelerator()
+    if max_workers is not None:
+        workers = max_workers
+    else:
+        workers = 1 if not has_accel else max(1, (os.cpu_count() or 2) // 2)
+
+    if not has_accel:
+        log.info("  No GPU/MPS detected. Using CPU-only OCR with fewer worker processes.")
+    log.info(f"  {len(tasks)} PDFs to OCR ({workers} processes, EasyOCR {'GPU/MPS' if has_accel else 'CPU'})")
 
     results: dict[str, dict] = {}
     with ProcessPoolExecutor(max_workers=workers) as executor:

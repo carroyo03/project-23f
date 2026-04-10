@@ -25,6 +25,7 @@ import pdfplumber
 from PIL import Image
 from tqdm import tqdm
 import numpy as np
+import torch
 import easyocr
 
 DATA_DIR = Path("data")
@@ -43,6 +44,15 @@ _OCR_READER = None
 def _allow_easyocr_model_downloads() -> None:
     """Allow EasyOCR to fetch its model files in environments with broken CA bundles."""
     ssl._create_default_https_context = ssl._create_unverified_context
+
+
+def _has_accelerator() -> bool:
+    """Detect whether a GPU or MPS device is available for EasyOCR."""
+    if torch.cuda.is_available():
+        return True
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return True
+    return False
 
 
 def _get_reader(gpu: bool = False):
@@ -83,7 +93,7 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
 
     try:
         # Reuse one EasyOCR reader per process.
-        reader = _get_reader(gpu=False)
+        reader = _get_reader()
         pages_text: list[str] = []
 
         with pdfplumber.open(pdf_path) as pdf:
@@ -156,7 +166,7 @@ def process_scanned_pdfs(
         print(f"Limiting to {limit} PDFs for testing\n")
 
     print("Pre-warming EasyOCR model cache...")
-    _warm_up_easyocr_cache(gpu=False)
+    _warm_up_easyocr_cache()
 
     # Build task list (pdf_path, txt_path)
     tasks: list[tuple[str, str]] = []

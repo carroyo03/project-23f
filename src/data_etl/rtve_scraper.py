@@ -5,11 +5,12 @@ https://23fbuscador.rtve.es
 Extracts: name, pages, size, full summary, tags.
 Saves to data/metadata/rtve_23f.csv
 
-Usage: python src/rtve_scraper.py
+Usage: python src/data_etl/rtve_scraper.py
 """
 
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 
 import niquests
 import pandas as pd
@@ -17,7 +18,8 @@ from bs4 import BeautifulSoup
 from tqdm import tqdm
 
 BASE_URL = "https://23fbuscador.rtve.es/"
-OUTPUT_PATH = "data/metadata/rtve_documents.csv"
+OUTPUT_PATH = Path("data/metadata/rtve_documents.csv")
+MAX_RETRIES = 3
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0.0.0 Safari/537.36",
@@ -28,10 +30,24 @@ RATE_LIMIT = 0.3       # seconds between requests per thread
 MAX_DETAIL_WORKERS = 8
 
 
+def _request_with_retries(session: niquests.Session, url: str, params: dict | None = None, timeout: int = 30) -> niquests.Response:
+    for attempt in range(MAX_RETRIES):
+        try:
+            r = session.get(url, params=params, timeout=timeout)
+            r.raise_for_status()
+            return r
+        except niquests.RequestException as e:
+            if attempt < MAX_RETRIES - 1:
+                wait = 2 ** attempt
+                print(f"  ⚠️ Request failed ({e}), retrying in {wait}s...")
+                time.sleep(wait)
+                continue
+            raise
+
+
 def _get_page(session: niquests.Session, page_size: int = 200, page: int = 1) -> str:
     params = {"page_size": page_size, "page": page}
-    r = session.get(BASE_URL, params=params, timeout=30)
-    r.raise_for_status()
+    r = _request_with_retries(session, BASE_URL, params=params, timeout=30)
     return r.text
 
 
@@ -101,8 +117,7 @@ def _fetch_summary(session: niquests.Session, url: str) -> str:
         return ""
     time.sleep(RATE_LIMIT)
     try:
-        r = session.get(url, timeout=30)
-        r.raise_for_status()
+        r = _request_with_retries(session, url, timeout=30)
         soup = BeautifulSoup(r.text, "html.parser")
         for sel in [".summary-cell", ".resumen", ".doc-summary", "[class*='summary']", "p.summary"]:
             el = soup.select_one(sel)
@@ -111,7 +126,7 @@ def _fetch_summary(session: niquests.Session, url: str) -> str:
                 if text:
                     return text
         return ""
-    except Exception:
+    except niquests.RequestException:
         return ""
 
 
@@ -160,6 +175,7 @@ def main() -> None:
     if df.empty:
         return
 
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
     df.to_csv(OUTPUT_PATH, index=False, encoding="utf-8-sig")
     print(f"\n💾 Saved to: {OUTPUT_PATH}  ({len(df)} documents)")
 
