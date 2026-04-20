@@ -26,6 +26,8 @@ Analysis of the declassified documents relating to the February 23, 1981 attempt
 │   └── build_corpus.py             # Builds document_corpus.csv from all sources
 ├── notebooks/
 │   └── 00_initial_exploration.ipynb
+│   └── EDA_Sprint1_Alejandro.ipynb
+│   └── sprint2_carlos_ner_graphs.ipynb
 ├── outputs/                        # Figures, Gephi exports
 ├── reports/                        # Project report
 ├── pipeline.py                     # End-to-end pipeline → df_final (main entry point)
