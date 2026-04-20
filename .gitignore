@@ -38,3 +38,11 @@ sprints*.html
 # Sprint 1 generated artifacts (keep only manual validation sheet)
 outputs/sprint1/*
 !outputs/sprint1/manual_validation_sample.csv
+
+
+# Sprint 2: keep only final deliverables
+outputs/sprint2/*
+!outputs/sprint2/metrics.csv
+!outputs/sprint2/network.gexf
+!outputs/sprint2/network_23f.gephi
+!outputs/sprint2/network_gephi.png

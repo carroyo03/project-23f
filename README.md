@@ -158,6 +158,27 @@ Outputs:
 - `outputs/sprint1/top_words_by_ministry.csv`
 - `outputs/sprint1/nlp_preprocess_summary.txt`
 
+### 6. Sprint 2 (Carlos) — NER + grafo de co-ocurrencia
+
+Pipeline end-to-end desde el notebook `notebooks/sprint2_carlos_ner_graphs.ipynb`:
+
+1. **NER** con spaCy `es_core_news_lg` → `ner_extractor.run_ner_on_corpus`.
+2. **Normalización** (whitelists 23-F + fuzzy) → `entity_normalizer.run_normalization` → `normalized_entities.csv` + `network_edges.csv`.
+3. **Grafo** ponderado → `graph_builder.build_graph`.
+4. **Métricas** (degree, betweenness, Louvain) → `graph_metrics.compute_metrics` + `top_brokers`.
+5. **Export Gephi** con comunidades coloreadas → `gephi_exporter.export_gexf` → `outputs/sprint2/network.gexf`.
+
+Outputs en `outputs/sprint2/`:
+- `metrics.csv` — tabla por nodo (degree, betweenness, comunidad).
+- `network.gexf` — para abrir en Gephi (color por comunidad, tamaño por betweenness).
+- `network_overview.png` — figura de respaldo generada en el notebook.
+
+```bash
+jupyter notebook notebooks/sprint2_carlos_ner_graphs.ipynb
+```
+
+---
+
 If you only want to inspect or rebuild the Moncloa extraction step, you can run:
 
 ```bash

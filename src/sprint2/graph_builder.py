@@ -1,0 +1,65 @@
+"""Construye el grafo de co-ocurrencia 23-F a partir de las aristas
+generadas por `entity_normalizer` y los nodos canónicos.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+import pandas as pd
+import networkx as nx
+
+
+def build_graph(
+    edges_csv: str | Path,
+    nodes_csv: str | Path | None = None,
+    min_weight: int = 2,
+    min_degree: int = 1,
+) -> nx.Graph:
+    """Construye un `nx.Graph` ponderado.
+
+    Parameters
+    ----------
+    edges_csv : ruta a `network_edges.csv` (Source, Target, Weight).
+    nodes_csv : ruta a `normalized_entities.csv` para tipar PER/ORG.
+    min_weight : umbral mínimo de co-ocurrencia para conservar la arista.
+    min_degree : umbral mínimo de grado para conservar el nodo.
+    """
+    edges = pd.read_csv(edges_csv)
+    edges = edges[edges["Weight"] >= min_weight]
+
+    G = nx.Graph()
+    for _, row in edges.iterrows():
+        G.add_edge(row["Source"], row["Target"], weight=int(row["Weight"]))
+
+    if nodes_csv is not None:
+        nodes = pd.read_csv(nodes_csv)
+        type_map = (
+            nodes.dropna(subset=["entity_canonical", "entity_type"])
+            .groupby("entity_canonical")["entity_type"]
+            .agg(lambda s: s.value_counts().index[0])
+            .to_dict()
+        )
+        for n in G.nodes():
+            G.nodes[n]["type"] = type_map.get(n, "UNK")
+    else:
+        for n in G.nodes():
+            G.nodes[n]["type"] = "UNK"
+
+    if min_degree > 1:
+        low = [n for n, d in G.degree() if d < min_degree]
+        G.remove_nodes_from(low)
+
+    G.remove_nodes_from(list(nx.isolates(G)))
+    return G
+
+
+def graph_summary(G: nx.Graph) -> dict:
+    """Resumen rápido del grafo."""
+    types = pd.Series([d.get("type", "UNK") for _, d in G.nodes(data=True)])
+    return {
+        "n_nodes": G.number_of_nodes(),
+        "n_edges": G.number_of_edges(),
+        "density": nx.density(G),
+        "n_components": nx.number_connected_components(G),
+        "type_counts": types.value_counts().to_dict(),
+        "avg_degree": sum(dict(G.degree()).values()) / max(G.number_of_nodes(), 1),
+    }
