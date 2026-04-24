@@ -39,13 +39,33 @@ def build_sample(sample_size: int, seed: int) -> pd.DataFrame:
     existing = [c for c in selected_columns if c in df.columns]
     sample_n = min(sample_size, len(df))
 
-    sample = df[existing].sample(n=sample_n, random_state=seed).sort_index().copy()
+    # Prefer a mixed sample so handwritten/scanned PDFs are always represented.
+    scanned = df[df["is_scanned"] == True] if "is_scanned" in df.columns else pd.DataFrame()  # noqa: E712
+    regular = df[df["is_scanned"] != True] if "is_scanned" in df.columns else df  # noqa: E712
+
+    scanned_n = min(max(1, sample_n // 2) if len(scanned) else 0, len(scanned))
+    regular_n = min(sample_n - scanned_n, len(regular))
+
+    sampled_parts = []
+    if scanned_n:
+        sampled_parts.append(scanned[existing].sample(n=scanned_n, random_state=seed))
+    if regular_n:
+        sampled_parts.append(regular[existing].sample(n=regular_n, random_state=seed + 1))
+
+    sample = pd.concat(sampled_parts, axis=0).drop_duplicates()
+    if len(sample) < sample_n:
+        remaining = df.loc[~df.index.isin(sample.index), existing]
+        extra = remaining.sample(n=min(sample_n - len(sample), len(remaining)), random_state=seed + 2)
+        sample = pd.concat([sample, extra], axis=0)
+
+    sample = sample.sort_index().copy()
 
     # Columns for manual QA round by the team.
     sample["manual_date"] = ""
     sample["manual_doc_type"] = ""
     sample["date_ok"] = ""
     sample["doc_type_ok"] = ""
+    sample["needs_ocr"] = sample["is_scanned"] if "is_scanned" in sample.columns else ""
     sample["notes"] = ""
 
     return sample

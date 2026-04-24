@@ -114,12 +114,17 @@ def main() -> None:
         raise FileNotFoundError(f"Missing input file: {CORPUS_CSV}")
 
     df = pd.read_csv(CORPUS_CSV)
-    moncloa = df[(df["source"] == "Moncloa") & (df["extracted_text"].notna())].copy()
+
+    text_col = "analysis_text" if "analysis_text" in df.columns else "extracted_text"
+    moncloa = df[df["source"] == "Moncloa"].copy()
+    if "flag_illegible" in moncloa.columns:
+        moncloa = moncloa[~moncloa["flag_illegible"]].copy()
+    moncloa = moncloa[moncloa[text_col].notna() & (moncloa[text_col].astype(str).str.strip() != "")].copy()
 
     if moncloa.empty:
-        raise ValueError("No Moncloa extracted_text rows found")
+        raise ValueError(f"No Moncloa {text_col} rows found")
 
-    moncloa["tokens"] = moncloa["extracted_text"].astype(str).apply(lambda t: tokenize(t, args.min_len))
+    moncloa["tokens"] = moncloa[text_col].astype(str).apply(lambda t: tokenize(t, args.min_len))
 
     all_tokens = [tok for row in moncloa["tokens"] for tok in row]
     overall = pd.DataFrame(top_tokens(all_tokens, args.top_k), columns=["token", "count"])
@@ -153,6 +158,7 @@ def main() -> None:
         f"Total tokens (after cleaning): {len(all_tokens)}",
         f"Top-k: {args.top_k}",
         f"Min token length: {args.min_len}",
+        f"Text column used: {text_col}",
         f"Output: {overall_path}",
         f"Output: {by_ministry_path}",
     ]

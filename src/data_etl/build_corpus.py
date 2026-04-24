@@ -10,8 +10,15 @@ Output schema (document_corpus.csv):
 
 import os
 import re
+import sys
 import pandas as pd
 from typing import Optional
+from pathlib import Path
+
+
+ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from src.data_etl.data_cleaning import process_corpus_quality
 
@@ -55,17 +62,38 @@ def load_moncloa() -> pd.DataFrame:
     df_m = pd.read_csv(MONCLOA_META)
     rows = []
 
-    for idx, row in df_m.iterrows():
+    def resolve_txt_file(row) -> str:
         txt_path = row.get("txt_path", "")
-        extracted_text = ""
         if isinstance(txt_path, str) and txt_path:
-            filepath = os.path.join("data", "processed", os.path.basename(txt_path))
-            if os.path.exists(filepath):
-                try:
-                    with open(filepath, "r", encoding="utf-8") as f:
-                        extracted_text = f.read()
-                except Exception as e:
-                    print(f"Error reading {filepath}: {e}")
+            candidate = Path(txt_path)
+            if candidate.exists():
+                return str(candidate)
+            candidate = ROOT / txt_path
+            if candidate.exists():
+                return str(candidate)
+
+        rel_path = row.get("rel_path", "")
+        if isinstance(rel_path, str) and rel_path:
+            candidate = ROOT / "data" / "processed" / Path(rel_path).with_suffix(".txt")
+            if candidate.exists():
+                return str(candidate)
+
+        filename = row.get("filename", "")
+        if isinstance(filename, str) and filename:
+            for candidate in (ROOT / "data" / "processed").rglob(Path(filename).with_suffix(".txt").name):
+                return str(candidate)
+
+        return ""
+
+    for idx, row in df_m.iterrows():
+        extracted_text = ""
+        filepath = resolve_txt_file(row)
+        if filepath and os.path.exists(filepath):
+            try:
+                with open(filepath, "r", encoding="utf-8") as f:
+                    extracted_text = f.read()
+            except Exception as e:
+                print(f"Error reading {filepath}: {e}")
 
         extracted_text = _clean_text(extracted_text)
 
