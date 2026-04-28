@@ -6,8 +6,8 @@ from itertools import combinations
 from collections import Counter
 
 # ---------------------------------------------------------------------------
-# Whitelists: canonical name → lista de aliases normalizados (sin tildes,
-# minúsculas). El canonical es la forma que aparecerá en el grafo final.
+# Whitelists: canonical name -> list of normalized aliases (accent-less,
+# lowercase). The canonical value is the form that appears in the final graph.
 # ---------------------------------------------------------------------------
 
 PEOPLE_CANONICAL = {
@@ -301,7 +301,7 @@ def _clean_ocr(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Blacklist Genérica
+# Generic blacklist
 # ---------------------------------------------------------------------------
 
 GENERIC_BLACKLIST = {
@@ -570,30 +570,30 @@ def frequency_filter(df_long: pd.DataFrame, min_docs: int = 2) -> tuple[pd.DataF
 
 def generate_edges(df_nodes: pd.DataFrame, output_edges_csv: str) -> pd.DataFrame:
     """
-    Genera las aristas (edges) del grafo basándose en la co-ocurrencia 
-    de entidades dentro del mismo documento (doc_id).
+    Generate graph edges based on entity co-occurrence
+    within the same document (doc_id).
     """
-    print("\n[Grafo] Construyendo aristas basadas en co-ocurrencia por documento...")
+    print("\n[Graph] Building co-occurrence edges by document...")
     
-    # 1. Eliminar duplicados para que si Tejero sale 5 veces en el doc 1, cuente como 1
+    # 1. Remove duplicates so repeated mentions in one doc count once.
     df_unique = df_nodes.drop_duplicates(subset=["doc_id", "entity_canonical"])
     
-    # 2. Agrupar las entidades por documento
+    # 2. Group entities by document
     docs = df_unique.groupby("doc_id")["entity_canonical"].apply(list)
     
-    # 3. Generar todas las combinaciones de pares (Aristas)
+    # 3. Generate all pair combinations (edges)
     edges = []
     for entities in docs:
         if len(entities) > 1:
-            # Ordenar para evitar que (A,B) sea diferente de (B,A)
+            # Sort so (A,B) is the same as (B,A)
             entities = sorted(entities)
             for pair in combinations(entities, 2):
                 edges.append(pair)
                 
-    # 4. Contar el peso (Weight) de cada conexión
+    # 4. Count edge weight for each connection
     edge_counts = Counter(edges)
     
-    # 5. Convertir a DataFrame
+    # 5. Convert to DataFrame
     df_edges = pd.DataFrame(
         [{"Source": src, "Target": tgt, "Weight": weight} for (src, tgt), weight in edge_counts.items()]
     )
@@ -601,11 +601,11 @@ def generate_edges(df_nodes: pd.DataFrame, output_edges_csv: str) -> pd.DataFram
     if not df_edges.empty:
         df_edges = df_edges.sort_values(by="Weight", ascending=False)
         df_edges.to_csv(output_edges_csv, index=False)
-        print(f"[Grafo] Generadas {len(df_edges)} aristas. Guardado en {output_edges_csv}")
-        print("\nTop 10 Conexiones más fuertes:")
+        print(f"[Graph] Generated {len(df_edges)} edges. Saved to {output_edges_csv}")
+        print("\nTop 10 strongest connections:")
         print(df_edges.head(10).to_string(index=False))
     else:
-        print("[Grafo] ¡Alerta! No se encontraron conexiones (documentos con múltiples entidades).")
+        print("[Graph] Warning: no connections found (documents with multiple entities were not detected).")
         
     return df_edges
 
@@ -618,7 +618,7 @@ def run_normalization(ner_csv: str, output_nodes_csv: str, output_edges_csv: str
     df_long = flatten_entities(df_ner)
     df_long = apply_normalization(df_long, people_lookup, people_candidates, org_lookup, org_candidates, threshold)
 
-    # Convertimos a string para asegurar que no haya floats/NaNs antes de limpiar
+    # Convert to string to avoid float/NaN artifacts before cleanup
     df_long["entity_canonical"] = df_long["entity_canonical"].astype(str)
 
     df_long = df_long[
@@ -632,7 +632,7 @@ def run_normalization(ner_csv: str, output_nodes_csv: str, output_edges_csv: str
     df_nodes = kept[output_cols]
     df_nodes.to_csv(output_nodes_csv, index=False)
     
-    # Generar aristas
+    # Generate edges
     df_edges = generate_edges(df_nodes, output_edges_csv)
 
     return df_nodes, df_edges

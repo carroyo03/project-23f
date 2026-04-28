@@ -15,6 +15,7 @@ Usage:
 
 import argparse
 import os
+import re
 import ssl
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
@@ -37,8 +38,15 @@ METADATA_DIR = DATA_DIR / "metadata"
 OCR_LANG = "es"  # EasyOCR uses 'es' for Spanish
 RESOLUTION = 300  # DPI for page-to-image conversion
 
+MIN_ALPHA_CHARS = 40
+MAX_PAGE_MARKER_RATIO = 0.7
+
 
 _OCR_READER = None
+_PAGE_MARKER_RE = re.compile(
+    r"^\s*(?:[-–—\s]*)?(?:page|p[aá]gina)\s*[:\-]?\s*\d+(?:\s*(?:/|de)\s*\d+)?\s*(?:[-–—\s]*)$",
+    flags=re.IGNORECASE,
+)
 
 
 def _allow_easyocr_model_downloads() -> None:
@@ -55,6 +63,15 @@ def _has_accelerator() -> bool:
     return False
 
 
+def detect_ocr_device() -> str:
+    """Detect and return the device type: 'cuda', 'mps', or 'cpu'."""
+    if torch.cuda.is_available():
+        return "cuda"
+    if getattr(torch.backends, "mps", None) is not None and torch.backends.mps.is_available():
+        return "mps"
+    return "cpu"
+
+
 def _get_reader(gpu: bool = False):
     """Creates one EasyOCR reader per process and reuses it across tasks."""
     global _OCR_READER
@@ -67,6 +84,23 @@ def _get_reader(gpu: bool = False):
 def _warm_up_easyocr_cache(gpu: bool = False) -> None:
     """Downloads EasyOCR models once in the parent process before spawning workers."""
     _get_reader(gpu=gpu)
+
+
+def _assess_ocr_quality(page_texts: list[str]) -> tuple[bool, float, str]:
+    """Returns (is_bad, page_marker_ratio, reason) for OCR text quality checks."""
+    joined = "\n".join(t for t in page_texts if isinstance(t, str))
+    lines = [ln.strip() for ln in joined.splitlines() if ln.strip()]
+
+    if not lines:
+        return True, 1.0, "empty_text"
+
+    marker_lines = sum(1 for ln in lines if _PAGE_MARKER_RE.match(ln))
+    marker_ratio = marker_lines / len(lines)
+    alpha_chars = sum(ch.isalpha() for ch in joined)
+
+    if marker_ratio >= MAX_PAGE_MARKER_RATIO and alpha_chars < MIN_ALPHA_CHARS:
+        return True, marker_ratio, "mostly_page_markers"
+    return False, marker_ratio, "ok"
 
 
 # ---------------------------------------------------------------------------
@@ -82,7 +116,7 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
         args: (pdf_path_str, txt_path_str)
 
     Returns:
-        dict with {archivo, status, chars, error}.
+        dict with {filename, status, chars, error}.
     """
     pdf_path_str, txt_path_str = args
     pdf_path = Path(pdf_path_str)
@@ -92,9 +126,10 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
         return {"filename": pdf_path.name, "status": "pdf_not_found", "chars": 0, "error": "PDF not found"}
 
     try:
-        # Reuse one EasyOCR reader per process.
-        reader = _get_reader()
+        # Reuse one EasyOCR reader per process with GPU acceleration if available.
+        reader = _get_reader(gpu=_has_accelerator())
         pages_text: list[str] = []
+        raw_ocr_texts: list[str] = []
 
         with pdfplumber.open(pdf_path) as pdf:
             for i, page in enumerate(pdf.pages):
@@ -105,16 +140,40 @@ def _ocr_worker(args: tuple[str, str]) -> dict:
                     img_np = np.stack([img_np]*3, axis=-1)
                 result = reader.readtext(img_np, detail=0, paragraph=True)
                 text = "\n".join(result)
+                raw_ocr_texts.append(text)
                 pages_text.append(f"--- Page {i + 1} ---\n{text}")
 
         full_text = "\n\n".join(pages_text)
+        is_bad, marker_ratio, reason = _assess_ocr_quality(raw_ocr_texts)
+
         txt_path.parent.mkdir(parents=True, exist_ok=True)
         txt_path.write_text(full_text, encoding="utf-8")
 
-        return {"filename": pdf_path.name, "status": "success", "chars": len(full_text), "error": None}
+        if is_bad:
+            return {
+                "filename": pdf_path.name,
+                "status": "bad_extraction",
+                "chars": len(full_text),
+                "error": reason,
+                "page_marker_ratio": marker_ratio,
+            }
+
+        return {
+            "filename": pdf_path.name,
+            "status": "success",
+            "chars": len(full_text),
+            "error": None,
+            "page_marker_ratio": marker_ratio,
+        }
 
     except Exception as e:
-        return {"filename": pdf_path.name, "status": "error", "chars": 0, "error": str(e)}
+        return {
+            "filename": pdf_path.name,
+            "status": "error",
+            "chars": 0,
+            "error": str(e),
+            "page_marker_ratio": None,
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -166,7 +225,9 @@ def process_scanned_pdfs(
         print(f"Limiting to {limit} PDFs for testing\n")
 
     print("Pre-warming EasyOCR model cache...")
-    _warm_up_easyocr_cache()
+    device = detect_ocr_device()
+    print(f"Using device: {device}")
+    _warm_up_easyocr_cache(gpu=_has_accelerator())
 
     # Build task list (pdf_path, txt_path)
     tasks: list[tuple[str, str]] = []
@@ -176,8 +237,17 @@ def process_scanned_pdfs(
         txt_path = PROCESSED_DIR / rel_path.with_suffix(".txt")
         tasks.append((str(pdf_path), str(txt_path)))
 
-    workers = max_workers or max(1, (os.cpu_count() or 2) // 2)
+    has_accel = _has_accelerator()
+    if has_accel:
+        workers = 1 if max_workers is None else max_workers
+        if workers > 1 and os.getenv("OCR_FORCE_MULTI_GPU", "0") != "1":
+            print("WARNING: Forcing workers=1 for GPU/MPS OCR stability.")
+            workers = 1
+    else:
+        workers = max_workers or max(1, (os.cpu_count() or 2) // 2)
+
     print(f"Parallel processes : {workers}")
+    print(f"GPU acceleration   : {'enabled' if has_accel else 'disabled (CPU only)'}")
     print(f"Starting OCR...\n")
 
     results: list[dict] = []
@@ -188,10 +258,12 @@ def process_scanned_pdfs(
 
     df_results = pd.DataFrame(results)
     success = df_results[df_results["status"] == "success"]
+    bad = df_results[df_results["status"] == "bad_extraction"]
     errors = df_results[df_results["status"] == "error"]
 
     print("\n" + "=" * 60)
     print(f"✓ Successful: {len(success)}")
+    print(f"⚠ Bad OCR    : {len(bad)}")
     print(f"✗ Errors    : {len(errors)}")
     if not success.empty:
         print(f"  Extracted chars (total)  : {success['chars'].sum():,}")
@@ -199,14 +271,37 @@ def process_scanned_pdfs(
     if not errors.empty:
         print("\nFirst errors:")
         for _, e in errors.head(5).iterrows():
-            print(f"  {e['archivo']}: {e.get('error', '?')}")
+            print(f"  {e['filename']}: {e.get('error', '?')}")
+    if not bad.empty:
+        print("\nFirst bad extractions:")
+        for _, b in bad.head(5).iterrows():
+            ratio = b.get("page_marker_ratio")
+            ratio_str = f"{ratio:.2f}" if pd.notna(ratio) else "n/a"
+            print(f"  {b['filename']}: reason={b.get('error', '?')} marker_ratio={ratio_str}")
 
-    if update_csv and not success.empty:
+    if update_csv and (not success.empty or not bad.empty):
         df_meta = pd.read_csv(csv_path)
+
+        if "ocr_quality" not in df_meta.columns:
+            df_meta["ocr_quality"] = ""
+        if "ocr_page_marker_ratio" not in df_meta.columns:
+            df_meta["ocr_page_marker_ratio"] = np.nan
+
         for _, res in success.iterrows():
             mask = df_meta["filename"] == res["filename"]
             df_meta.loc[mask, "char_count"] = res["chars"]
             df_meta.loc[mask, "is_scanned"] = False
+            df_meta.loc[mask, "success"] = True
+            df_meta.loc[mask, "ocr_quality"] = "ok"
+            df_meta.loc[mask, "ocr_page_marker_ratio"] = res.get("page_marker_ratio", np.nan)
+
+        for _, res in bad.iterrows():
+            mask = df_meta["filename"] == res["filename"]
+            df_meta.loc[mask, "is_scanned"] = True
+            df_meta.loc[mask, "success"] = False
+            df_meta.loc[mask, "ocr_quality"] = "bad_page_markers"
+            df_meta.loc[mask, "ocr_page_marker_ratio"] = res.get("page_marker_ratio", np.nan)
+
         df_meta.to_csv(csv_path, index=False)
         print(f"\nCSV updated: {csv_path}")
 

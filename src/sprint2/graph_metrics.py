@@ -1,5 +1,5 @@
-"""Métricas del grafo 23-F: degree, betweenness, comunidades Louvain
-y ranking de brokers entre comunidades.
+"""23-F graph metrics: degree, betweenness, Louvain communities,
+and ranking of inter-community brokers.
 """
 from __future__ import annotations
 
@@ -10,10 +10,10 @@ from networkx.algorithms.community import louvain_communities
 
 
 def compute_metrics(G: nx.Graph, seed: int = 42) -> pd.DataFrame:
-    """Calcula degree, degree_centrality, betweenness y community_id por nodo.
+    """Compute degree, degree_centrality, betweenness, and community_id per node.
 
-    Devuelve un DataFrame ordenado por betweenness descendente y deja los
-    valores escritos como atributos del grafo (para export Gephi).
+    Returns a DataFrame sorted by descending betweenness and also writes those
+    values as graph node attributes (for Gephi export).
     """
     degree = dict(G.degree(weight="weight"))
     deg_cent = nx.degree_centrality(G)
@@ -45,7 +45,7 @@ def compute_metrics(G: nx.Graph, seed: int = 42) -> pd.DataFrame:
 
 
 def top_brokers(metrics: pd.DataFrame, G: nx.Graph, top_n: int = 10) -> pd.DataFrame:
-    """Top-N brokers: alto betweenness y conectan ≥2 comunidades distintas."""
+    """Top-N brokers: high betweenness and links to >= 2 different communities."""
     comm_by_entity = dict(zip(metrics["entity"], metrics["community_id"]))
     rows = []
     for _, r in metrics.iterrows():

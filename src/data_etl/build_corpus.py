@@ -126,6 +126,7 @@ def load_rtve() -> pd.DataFrame:
 
     for idx, row in df_r.iterrows():
         rtve_summary = _clean_text(str(row.get("summary", "")))
+        extracted_text = _clean_text(str(row.get("extracted_text", "")))
 
         rows.append({
             "doc_id":                 f"R{idx + 1:03d}",
@@ -138,8 +139,8 @@ def load_rtve() -> pd.DataFrame:
             "date":                   None,
             "doc_type":               None,
             "tags":                   row.get("tags") or None,
-            "extracted_text":         None,
-            "extracted_text_length":  0,
+            "extracted_text":         extracted_text or None,
+            "extracted_text_length":  len(extracted_text),
             "rtve_summary":           rtve_summary or None,
         })
 
@@ -149,12 +150,15 @@ def load_rtve() -> pd.DataFrame:
 def apply_analysis_text(df: pd.DataFrame) -> pd.DataFrame:
     """Sets the canonical text metric based on available data and illegibility."""
     def get_canonical(row):
-        if row["source"] == "RTVE":
-            return row["rtve_summary"] if pd.notna(row["rtve_summary"]) else ""
-        if row["source"] == "Moncloa":
-            if row.get("flag_illegible", False):
-                return "" # Drop noisy text from downstream NLP
-            return row["extracted_text"] if pd.notna(row["extracted_text"]) else ""
+        # If flagged as illegible, return empty
+        if row.get("flag_illegible", False):
+            return ""
+        # Use extracted_text if available (both Moncloa and RTVE)
+        if pd.notna(row.get("extracted_text")) and row["extracted_text"]:
+            return row["extracted_text"]
+        # Fall back to rtve_summary if available
+        if pd.notna(row.get("rtve_summary")) and row["rtve_summary"]:
+            return row["rtve_summary"]
         return ""
         
     df["analysis_text"] = df.apply(get_canonical, axis=1)

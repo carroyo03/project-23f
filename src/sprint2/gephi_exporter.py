@@ -1,5 +1,5 @@
-"""Exporta el grafo 23-F a Gephi (.gexf) con atributos visuales:
-color por comunidad y tamaño por betweenness.
+"""Export the 23-F graph to Gephi (.gexf) with visual attributes:
+community color and betweenness-based node size.
 """
 from __future__ import annotations
 

@@ -278,32 +278,80 @@ def run_ocr(df_meta: pd.DataFrame, max_workers: int | None = None, force: bool =
         return df_meta
 
     has_accel = _has_accelerator()
-    if max_workers is not None:
-        workers = max_workers
+    if has_accel:
+        workers = max_workers if max_workers is not None else 1
+        # EasyOCR + GPU in multiple worker processes is unstable in many environments.
+        if workers > 1 and os.getenv("OCR_FORCE_MULTI_GPU", "0") != "1":
+            log.warning("  GPU/MPS OCR with multiple processes can fail. Forcing max_ocr_workers=1.")
+            log.warning("  Set OCR_FORCE_MULTI_GPU=1 to keep multi-process GPU OCR.")
+            workers = 1
     else:
-        workers = 1 if not has_accel else max(1, (os.cpu_count() or 2) // 2)
+        workers = max_workers if max_workers is not None else max(1, (os.cpu_count() or 2) // 2)
 
     if not has_accel:
         log.info("  No GPU/MPS detected. Using CPU-only OCR with fewer worker processes.")
     log.info(f"  {len(tasks)} PDFs to OCR ({workers} processes, EasyOCR {'GPU/MPS' if has_accel else 'CPU'})")
 
+    task_by_filename = {Path(pdf_path).name: (pdf_path, txt_path) for pdf_path, txt_path in tasks}
     results: dict[str, dict] = {}
     with ProcessPoolExecutor(max_workers=workers) as executor:
         future_map = {executor.submit(_ocr_worker, task): task for task in tasks}
         for future in tqdm(as_completed(future_map), total=len(tasks), desc="OCR"):
-            r = future.result()
+            pdf_path_str, _ = future_map[future]
+            fname = Path(pdf_path_str).name
+            try:
+                r = future.result()
+            except Exception as exc:
+                r = {"filename": fname, "status": "error", "chars": 0, "error": f"worker_crash: {exc}"}
+            results[r["filename"]] = r
+
+    # Retry failed files once in single-process mode (helps with intermittent GPU/process issues).
+    failed_files = [fname for fname, r in results.items() if r["status"] == "error"]
+    if failed_files and workers > 1:
+        log.warning(f"  Retrying {len(failed_files)} OCR failures in single-process mode...")
+        for fname in tqdm(failed_files, desc="OCR retry"):
+            task = task_by_filename.get(fname)
+            if not task:
+                continue
+            r = _ocr_worker(task)
             results[r["filename"]] = r
 
     df_meta = df_meta.copy()
+    if "ocr_quality" not in df_meta.columns:
+        df_meta["ocr_quality"] = ""
+    if "ocr_page_marker_ratio" not in df_meta.columns:
+        df_meta["ocr_page_marker_ratio"] = pd.NA
     for fname, r in results.items():
         if r["status"] == "success":
             mask = df_meta["filename"] == fname
             df_meta.loc[mask, "char_count"] = r["chars"]
             df_meta.loc[mask, "is_scanned"] = False
+            df_meta.loc[mask, "success"] = True
+            df_meta.loc[mask, "ocr_quality"] = "ok"
+            df_meta.loc[mask, "ocr_page_marker_ratio"] = r.get("page_marker_ratio")
+        elif r["status"] == "bad_extraction":
+            mask = df_meta["filename"] == fname
+            df_meta.loc[mask, "is_scanned"] = True
+            df_meta.loc[mask, "success"] = False
+            df_meta.loc[mask, "ocr_quality"] = "bad_page_markers"
+            df_meta.loc[mask, "ocr_page_marker_ratio"] = r.get("page_marker_ratio")
 
     ok   = sum(1 for r in results.values() if r["status"] == "success")
+    bad  = sum(1 for r in results.values() if r["status"] == "bad_extraction")
     errs = sum(1 for r in results.values() if r["status"] == "error")
-    log.info(f"  Done: {ok} OCR'd, {errs} errors")
+    log.info(f"  Done: {ok} OCR'd, {bad} bad extractions, {errs} errors")
+    if errs:
+        sample_errors = [f"{k}: {v.get('error', 'unknown')}" for k, v in results.items() if v["status"] == "error"][:5]
+        for msg in sample_errors:
+            log.warning(f"  OCR error sample -> {msg}")
+    if bad:
+        sample_bad = [
+            f"{k}: reason={v.get('error', 'unknown')}, marker_ratio={v.get('page_marker_ratio')}"
+            for k, v in results.items()
+            if v["status"] == "bad_extraction"
+        ][:5]
+        for msg in sample_bad:
+            log.warning(f"  OCR bad extraction -> {msg}")
     return df_meta
 
 
@@ -406,8 +454,8 @@ def build_final_corpus(df_moncloa: pd.DataFrame, df_rtve: pd.DataFrame) -> pd.Da
             "date":                  None,
             "doc_type":              None,
             "tags":                  row.get("tags") or None,
-            "extracted_text":        None,
-            "extracted_text_length": 0,
+            "extracted_text":        row.get("extracted_text") or None,
+            "extracted_text_length": len(row.get("extracted_text") or "") if isinstance(row.get("extracted_text"), str) else 0,
             "rtve_summary":          _clean_text(str(row.get("summary", ""))) or None,
         }
         for i, (_, row) in enumerate(df_rtve.iterrows())

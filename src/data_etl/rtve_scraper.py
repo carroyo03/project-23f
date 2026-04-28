@@ -2,7 +2,7 @@
 Scraper: Declassified 23-F Documents - RTVE
 https://23fbuscador.rtve.es
 
-Extracts: name, pages, size, full summary, tags.
+Extracts: name, pages, size, full summary, full OCR text, tags.
 Saves to data/metadata/rtve_23f.csv
 
 Usage: python src/data_etl/rtve_scraper.py
@@ -111,28 +111,42 @@ def _scrape_listing(session: niquests.Session, page_size: int = 200) -> list[dic
     return all_rows
 
 
-def _fetch_summary(session: niquests.Session, url: str) -> str:
-    """Gets the full summary from a document's detail page."""
+def _fetch_summary_and_text(session: niquests.Session, url: str) -> tuple[str, str]:
+    """
+    Gets both summary and full OCR text from a document's detail page.
+    Returns: (summary, extracted_text)
+    """
     if not url:
-        return ""
+        return "", ""
     time.sleep(RATE_LIMIT)
     try:
         r = _request_with_retries(session, url, timeout=30)
         soup = BeautifulSoup(r.text, "html.parser")
-        for sel in [".summary-cell", ".resumen", ".doc-summary", "[class*='summary']", "p.summary"]:
+        
+        # Extract full OCR text from <pre class="text-box text-box-large">
+        extracted_text = ""
+        ocr_pre = soup.select_one("pre.text-box.text-box-large")
+        if ocr_pre:
+            extracted_text = ocr_pre.get_text(separator="\n", strip=True)
+        
+        # Extract summary from <p class="text-box"> (first paragraph)
+        summary = ""
+        for sel in ["p.text-box", ".summary-cell", ".resumen", ".doc-summary", "[class*='summary']"]:
             el = soup.select_one(sel)
             if el:
                 text = el.get_text(separator=" ", strip=True)
                 if text:
-                    return text
-        return ""
+                    summary = text
+                    break
+        
+        return summary or "", extracted_text or ""
     except niquests.RequestException:
-        return ""
+        return "", ""
 
 
 def scrape_all(page_size: int = 200, max_detail_workers: int = MAX_DETAIL_WORKERS) -> pd.DataFrame:
     """
-    Scrapes the RTVE search engine and fetches full summaries in parallel.
+    Scrapes the RTVE search engine and fetches full summaries and OCR text in parallel.
 
     Args:
         page_size:           Documents per page in the listing.
@@ -151,23 +165,26 @@ def scrape_all(page_size: int = 200, max_detail_workers: int = MAX_DETAIL_WORKER
         df = pd.DataFrame(rows)
         print(f"\n✅ Total documents in listing: {len(df)}")
 
-        # Summaries in parallel with ThreadPoolExecutor
-        print(f"\n📄 Fetching summaries ({len(df)} pages, {max_detail_workers} threads)...")
+        # Fetch summaries and OCR text in parallel with ThreadPoolExecutor
+        print(f"\n📄 Fetching summaries and OCR text ({len(df)} pages, {max_detail_workers} threads)...")
         summaries: list[str] = [""] * len(df)
+        texts: list[str] = [""] * len(df)
 
         with ThreadPoolExecutor(max_workers=max_detail_workers) as executor:
             future_map = {
-                executor.submit(_fetch_summary, session, row["link"]): i
+                executor.submit(_fetch_summary_and_text, session, row["link"]): i
                 for i, (_, row) in enumerate(df.iterrows())
             }
             for future in tqdm(as_completed(future_map), total=len(future_map), desc="Details"):
                 idx = future_map[future]
-                text = future.result()
-                summaries[idx] = text or df.iloc[idx]["summary_truncated"]
+                summary, text = future.result()
+                summaries[idx] = summary or df.iloc[idx]["summary_truncated"]
+                texts[idx] = text
 
         df["summary"] = summaries
+        df["extracted_text"] = texts
 
-    return df[["name", "pages", "size_kb", "summary", "tags", "link"]]
+    return df[["name", "pages", "size_kb", "summary", "extracted_text", "tags", "link"]]
 
 
 def main() -> None:

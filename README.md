@@ -29,7 +29,9 @@ Analysis of the declassified documents relating to the February 23, 1981 attempt
 │   └── pipeline_entrega.ipynb
 │   └── EDA_Sprint1_Alejandro.ipynb
 │   └── sprint2_carlos_ner_graphs.ipynb
-├── outputs/                        # Figures, Gephi exports
+├── outputs/
+│   ├── sprint1/                    # Figures and CSVs generated in Sprint 1 (plots, summaries)
+│   └── sprint2/                    # Graph exports and Sprint 2 figures (Gephi .gexf, metrics)
 ├── reports/                        # Project report
 ├── pipeline.py                     # End-to-end pipeline → df_final (main entry point)
 ├── main.py                         # Step-by-step CLI orchestrator
@@ -56,7 +58,7 @@ The main analytical dataset. 322 rows × 17 columns (155 Moncloa + 167 RTVE). 30
 ### Known Limitations
 * **Missing Dates**: 81 documents have no date (`date_precision = unknown`), usually because their content is too fragmentary or they lack clear dating headers.
 * **Garbage OCR**: 16 Moncloa handwritten/garbled scanned documents have null `analysis_text` (`flag_illegible=True`) to prevent them from breaking NLP clustering and topic modeling downstream.
-* **RTVE Text**: RTVE items lack raw `extracted_text`. Since they represent judicial summaries, their `rtve_summary` is mapped directly to the `analysis_text` column.
+* **RTVE Text**: RTVE items now store `extracted_text` when available. If a document lacks it, `rtve_summary` is used as a fallback for `analysis_text`.
 * **Short Documents**: The median length of `analysis_text` is ~303 characters, meaning many documents are extremely short memos, telexes, or very brief RTVE trial summaries.
 * **Source Discrepancies**: `ministry` and `category` parameters are only available for the La Moncloa declassified dataset.
 
@@ -139,16 +141,7 @@ Expected:
 - `(322, 13)`
 - `155 167`
 
-### 5. Sprint 1 (Alber) quick tasks
-
-Generate the manual validation sample (10-15 rows suggested by the team plan):
-
-```bash
-python src/sprint1/manual_validation_sample.py --n 15
-```
-
-Output:
-- `outputs/sprint1/manual_validation_sample.csv`
+### 5. NLP Preprocessing and Vocabulary Exploration`
 
 Start NLP preprocessing and vocabulary exploration by ministry:
 
@@ -161,20 +154,20 @@ Outputs:
 - `outputs/sprint1/top_words_by_ministry.csv`
 - `outputs/sprint1/nlp_preprocess_summary.txt`
 
-### 6. Sprint 2 (Carlos) — NER + grafo de co-ocurrencia
+### 6. NER + Co-occurrence Graph
 
-Pipeline end-to-end desde el notebook `notebooks/sprint2_carlos_ner_graphs.ipynb`:
+End-to-end pipeline from notebook `notebooks/sprint2_carlos_ner_graphs.ipynb`:
 
-1. **NER** con spaCy `es_core_news_lg` → `ner_extractor.run_ner_on_corpus`.
-2. **Normalización** (whitelists 23-F + fuzzy) → `entity_normalizer.run_normalization` → `normalized_entities.csv` + `network_edges.csv`.
-3. **Grafo** ponderado → `graph_builder.build_graph`.
-4. **Métricas** (degree, betweenness, Louvain) → `graph_metrics.compute_metrics` + `top_brokers`.
-5. **Export Gephi** con comunidades coloreadas → `gephi_exporter.export_gexf` → `outputs/sprint2/network.gexf`.
+1. **NER** with spaCy `es_core_news_lg` -> `ner_extractor.run_ner_on_corpus`.
+2. **Normalization** (23-F whitelists + fuzzy matching) -> `entity_normalizer.run_normalization` -> `normalized_entities.csv` + `network_edges.csv`.
+3. **Weighted graph** -> `graph_builder.build_graph`.
+4. **Metrics** (degree, betweenness, Louvain) -> `graph_metrics.compute_metrics` + `top_brokers`.
+5. **Gephi export** with color-coded communities -> `gephi_exporter.export_gexf` -> `outputs/sprint2/network.gexf`.
 
-Outputs en `outputs/sprint2/`:
-- `metrics.csv` — tabla por nodo (degree, betweenness, comunidad).
-- `network.gexf` — para abrir en Gephi (color por comunidad, tamaño por betweenness).
-- `network_overview.png` — figura de respaldo generada en el notebook.
+Outputs in `outputs/sprint2/`:
+- `metrics.csv` - table by node (degree, betweenness, community).
+- `network.gexf` - open in Gephi (community-based colors, betweenness-based size).
+- `network_overview.png` - backup figure generated in the notebook.
 
 ```bash
 jupyter notebook notebooks/sprint2_carlos_ner_graphs.ipynb
